@@ -22,12 +22,12 @@ def test_function_only_in_py_file(script_path: pathlib.Path):
 
 
 @pytest.fixture
-def git_log(proj_folder: pathlib.Path) -> Tuple[str]:
+def git_log(workspace_folder: pathlib.Path) -> Tuple[str]:
     return tuple(
         subprocess.check_output(
             ['git', 'log', '--pretty=format"%h%x09%an%x09%ad%x09%s"'],
             encoding='utf-8',
-            cwd=proj_folder,
+            cwd=workspace_folder,
         ).splitlines()
     )
 

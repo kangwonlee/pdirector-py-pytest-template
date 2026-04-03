@@ -62,6 +62,12 @@ def script_path(proj_folder:pathlib.Path) -> pathlib.Path:
 
 
 @pytest.fixture
+def workspace_folder() -> pathlib.Path:
+    '''Path to the student workspace (git repo with prompt.md)'''
+    return WORKSPACE_MOUNT
+
+
+@pytest.fixture
 def prompt_path() -> pathlib.Path:
     '''Path to the student prompt file in the workspace mount'''
     return WORKSPACE_MOUNT / 'prompt.md'
