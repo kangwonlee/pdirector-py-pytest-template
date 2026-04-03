@@ -1,0 +1,151 @@
+# begin build.yml
+name: Build Grader Image
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Create virtual environment
+        run: uv venv .venv --python 3.11
+
+      - name: Install dependencies
+        run: uv pip install .
+
+      - name: Run canary tests
+        run: |
+          source .venv/bin/activate
+          if [ -d "canary_tests" ]; then
+            pytest canary_tests/ -v --tb=short
+          else
+            echo "No canary_tests directory found, skipping"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: linux/arm64,linux/amd64
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prep
+        id: prep
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          ASSIGNMENT_NUM=$(echo "${{ github.repository }}" | grep -o '[/-][0-9]\{3\}' | head -1 | tr -d '/-')
+          GHCR_IMAGE_NAME="ghcr.io/${{ github.repository }}:${SHORT_SHA}"
+          GHCR_IMAGE_LATEST="ghcr.io/${{ github.repository }}:latest"
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+          echo "ASSIGNMENT_NUM=$ASSIGNMENT_NUM" >> $GITHUB_ENV
+          echo "GHCR_IMAGE_NAME=${GHCR_IMAGE_NAME}" >> $GITHUB_ENV
+          echo "GHCR_IMAGE_NAME=${GHCR_IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "GHCR_IMAGE_LATEST=${GHCR_IMAGE_LATEST}" >> $GITHUB_ENV
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64,linux/amd64
+          tags: ${{ env.GHCR_IMAGE_NAME }},${{ env.GHCR_IMAGE_LATEST }}
+          push: true
+          secrets: |
+            "GIT_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}"
+    outputs:
+      GHCR_IMAGE_NAME: ${{ steps.prep.outputs.GHCR_IMAGE_NAME }}
+
+  owl-test:
+    runs-on: ubuntu-latest
+    needs: build-push
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull grader image
+        run: docker pull ${{ needs.build-push.outputs.GHCR_IMAGE_NAME }}
+
+      - name: Clone homework repo
+        id: clone-hw
+        continue-on-error: true
+        run: |
+          Q_REPO="${{ vars.Q_REPO }}"
+          if [ -z "$Q_REPO" ]; then
+            Q_REPO=$(echo "${{ github.repository }}" | sed 's/pytest/homework/')
+          fi
+          if [ -n "${{ secrets.BUILDER_PAT }}" ]; then
+            git clone --depth=1 \
+              "https://x-access-token:${{ secrets.BUILDER_PAT }}@github.com/${Q_REPO}.git" \
+              homework_workspace
+            echo "hw_dir=homework_workspace" >> $GITHUB_OUTPUT
+          else
+            echo "BUILDER_PAT not set, skipping homework clone"
+          fi
+
+      - name: Run owl test
+        run: |
+          . canary_tests/owl_test.sh \
+            "${{ needs.build-push.outputs.GHCR_IMAGE_NAME }}" \
+            "${{ steps.clone-hw.outputs.hw_dir || '' }}"
+
+  dispatch:
+    runs-on: ubuntu-latest
+    needs: [build-push, owl-test]
+    steps:
+      - name: Checkout grader code
+        uses: actions/checkout@v6
+
+      - name: Install uv Package Manager
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Install requests
+        run: |
+          uv venv my_env
+          . my_env/bin/activate
+          uv pip install requests
+
+      - name: trigger repo dispatch
+        env:
+          IMAGE_URL : ${{ needs.build-push.outputs.GHCR_IMAGE_NAME }}
+          TOKEN: ${{ secrets.BUILDER_PAT }}
+          Q_REPO: ${{ vars.Q_REPO }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
+        run: |
+          . my_env/bin/activate
+          python dispatch.py
+
+# end build.yml

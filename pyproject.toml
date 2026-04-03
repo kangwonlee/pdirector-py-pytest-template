@@ -1,0 +1,12 @@
+[project]
+name="eca-director-pytest-NNN"
+version="2026.03.31"
+dependencies=[
+    "pytest==8.3.5",
+    "pytest-json-report==1.5.0",
+    "pytest-xdist==3.6.1",
+    "requests==2.33.0",
+]
+
+[tool.pytest.ini_options]
+cache_dir = "/tmp/.pytest_cache"
