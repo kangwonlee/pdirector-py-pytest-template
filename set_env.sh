@@ -1,1 +1,1 @@
-export Q_REPO=kangwonlee/eca-director-hw-NNN
+export Q_REPO=kangwonlee/python-director-hw-NNN
